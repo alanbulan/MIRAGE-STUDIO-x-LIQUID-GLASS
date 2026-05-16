@@ -1,3 +1,5 @@
+export const runtime = 'edge';
+
 import { NextRequest, NextResponse } from 'next/server';
 
 const BASE_URL = 'https://chatgpt.alanbulan.space/v1';
