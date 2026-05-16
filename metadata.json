@@ -1,0 +1,8 @@
+{
+  "name": "幻境制造机 (Mirage Studio)",
+  "description": "二次元液态玻璃风格的多设备自适应AI绘画应用，支持多模型和批量生成。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
