@@ -504,9 +504,11 @@ export default function GeneratorView({
             imageUrl={referenceImage}
             onClose={() => setIsEditorOpen(false)}
             onSave={async (file) => {
-              setIsLoading(true);
+              // Note: ImageEditorModal handles its own loading state (isSaving)
+              // Setting global uploading is fine
+              setIsUploading(true);
               const url = await api.uploadImage(file);
-              setIsLoading(false);
+              setIsUploading(false);
               if (url) {
                 setReferenceImage(url);
                 setIsEditorOpen(false);

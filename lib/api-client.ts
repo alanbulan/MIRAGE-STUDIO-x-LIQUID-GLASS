@@ -114,14 +114,15 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // Include size safely, some models ignore it, others require it
-      body: JSON.stringify({ ...payload, size: "1024x1024" }),
+      body: JSON.stringify({ size: "1024x1024", ...payload }),
     });
     
     let raw;
+    const text = await res.text();
     try {
-      raw = await res.json();
+      raw = JSON.parse(text);
     } catch {
-      raw = await res.text();
+      raw = text;
     }
     
     return { status: res.status, data: raw };

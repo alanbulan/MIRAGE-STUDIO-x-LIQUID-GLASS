@@ -4,28 +4,21 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file");
-
-    if (!file) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
-    }
-
-    // Proxy to Telegraph image host
-    const uploadReq = new FormData();
-    uploadReq.append("file", file);
-
     const targetUrl = 'https://telegraph-image-92x.pages.dev/upload';
     
-    console.log(`Proxying upload to: ${targetUrl}`);
-
+    // Transparently forward the multipart form data request body
     const res = await fetch(targetUrl, {
       method: "POST",
-      body: uploadReq,
+      body: req.body,
       headers: {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Content-Type": req.headers.get("content-type") || "multipart/form-data",
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+        "Origin": "https://telegraph-image-92x.pages.dev",
+        "Referer": "https://telegraph-image-92x.pages.dev/"
       },
+      // @ts-ignore
+      duplex: "half"
     });
 
     if (!res.ok) {
@@ -38,6 +31,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(data);
   } catch (error: any) {
     console.error("Error in upload API handler:", error);
-    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Internal server error", stack: error.stack }, { status: 500 });
   }
 }
