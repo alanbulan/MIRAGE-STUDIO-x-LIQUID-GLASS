@@ -12,28 +12,38 @@ export async function POST(req: NextRequest, props: { params: Promise<{ path: st
   const url = `${BASE_URL}/${apiPath}`;
   
   try {
-    const body = await req.json();
+    // Safely parse body
+    const text = await req.text();
+    const body = text ? JSON.parse(text) : {};
+    
+    // Next.js Edge runtime 'fetch' requires special handling for certain headers
+    const requestHeaders = new Headers();
+    requestHeaders.set('Content-Type', 'application/json');
+    requestHeaders.set('Authorization', `Bearer ${API_KEY}`);
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`
-      },
+      headers: requestHeaders,
       body: JSON.stringify(body)
     });
     
-    // Some APIs might not return JSON, handle text just in case.
-    const contentType = response.headers.get('content-type');
+    const contentType = response.headers.get('content-type') || '';
+    const resText = await response.text();
+    
     let data;
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
+    if (contentType.includes('application/json') && resText) {
+      try {
+        data = JSON.parse(resText);
+      } catch {
+        data = resText;
+      }
     } else {
-      data = await response.text();
+      data = resText;
     }
     
     return NextResponse.json(data, { status: response.status });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Internal Server Error', stack: err.stack }, { status: 500 });
   }
 }
 
