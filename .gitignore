@@ -1,5 +1,7 @@
 node_modules/
 .next/
+.vercel/
+.wrangler/
 coverage/
 .DS_Store
 *.log
