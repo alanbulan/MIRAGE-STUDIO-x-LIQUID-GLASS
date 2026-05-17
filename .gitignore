@@ -1,6 +1,7 @@
 node_modules/
 .next/
-.vercel/
+.vercel/*
+!.vercel/project.json
 .wrangler/
 coverage/
 .DS_Store
