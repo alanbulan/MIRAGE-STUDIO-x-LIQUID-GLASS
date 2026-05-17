@@ -37,19 +37,47 @@ export const onRequest: PagesFunction<Env> = async ({ request, params, env }) =>
       init.body = JSON.stringify(body);
     }
 
-    const response = await fetch(url, init);
-    // Stream the upstream body straight through. This is critical for
-    // long-running endpoints like image generation: returning the Response
-    // object immediately lets Cloudflare's edge start forwarding bytes,
-    // avoiding the 100s edge HTTP timeout (524).
-    const headers = new Headers();
-    const upstreamCT = response.headers.get('content-type');
-    if (upstreamCT) headers.set('Content-Type', upstreamCT);
-    headers.set('Access-Control-Allow-Origin', '*');
-    headers.set('Cache-Control', 'no-store');
-    return new Response(response.body, {
-      status: response.status,
-      headers,
+    // Upstream image generation can take 60-180s and is buffered (uvicorn
+    // returns no headers until generation completes). Cloudflare's edge HTTP
+    // timeout is 100s — we'd 524 before fetch() even returns. Work around
+    // this by immediately returning a streamed Response and writing keepalive
+    // whitespace until the upstream resolves; JSON tolerates leading whitespace,
+    // so the client's res.json()/res.text()+parse path keeps working unchanged.
+    const stream = new ReadableStream({
+      async start(controller) {
+        const enc = new TextEncoder();
+        let upstreamDone = false;
+
+        (async () => {
+          while (!upstreamDone) {
+            try { controller.enqueue(enc.encode(' ')); } catch { return; }
+            await new Promise((r) => setTimeout(r, 5000));
+          }
+        })();
+
+        try {
+          const response = await fetch(url, init);
+          const text = await response.text();
+          controller.enqueue(enc.encode(text));
+        } catch (err: any) {
+          controller.enqueue(
+            enc.encode(JSON.stringify({ error: err?.message || 'Upstream fetch failed' })),
+          );
+        } finally {
+          upstreamDone = true;
+          try { controller.close(); } catch {}
+        }
+      },
+    });
+
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no',
+      },
     });
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message || 'Internal Server Error' }), {
