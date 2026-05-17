@@ -4,7 +4,7 @@ interface Env {
 
 const BASE_URL = 'https://chatgpt.alanbulan.space/v1';
 
-export const onRequest: PagesFunction<Env> = async ({ request, params, env, waitUntil }) => {
+export const onRequest: PagesFunction<Env> = async ({ request, params, env }) => {
   const method = request.method.toUpperCase();
   if (method !== 'GET' && method !== 'POST' && method !== 'OPTIONS') {
     return new Response('Method Not Allowed', { status: 405 });
@@ -37,61 +37,15 @@ export const onRequest: PagesFunction<Env> = async ({ request, params, env, wait
       init.body = JSON.stringify(body);
     }
 
-    // Upstream image generation can take 60-180s and is buffered (uvicorn
-    // returns no headers until generation completes). Cloudflare's edge HTTP
-    // timeout is 100s — we'd 524 before fetch() even returns. Work around
-    // this by immediately returning a streamed Response and writing keepalive
-    // whitespace until the upstream resolves; JSON tolerates leading whitespace,
-    // so the client's res.json()/res.text()+parse path keeps working unchanged.
-    const stream = new ReadableStream({
-      start(controller) {
-        const enc = new TextEncoder();
-        // Emit a byte synchronously so the CF edge sees us "responding"
-        // immediately — this resets the edge HTTP timer before fetch().
-        controller.enqueue(enc.encode(' '));
-        let upstreamDone = false;
-
-        // Heartbeat: keep dribbling whitespace every 5s so the edge keeps
-        // the client connection open while upstream is still working.
-        const heartbeat = (async () => {
-          while (!upstreamDone) {
-            await new Promise((r) => setTimeout(r, 5000));
-            if (upstreamDone) break;
-            try { controller.enqueue(enc.encode(' ')); } catch { return; }
-          }
-        })();
-
-        // Upstream fetch runs in the background; only its real body bytes
-        // (which JSON.parse on the client sees after stripping whitespace)
-        // are meaningful.
-        const upstream = (async () => {
-          try {
-            const response = await fetch(url, init);
-            const text = await response.text();
-            controller.enqueue(enc.encode(text));
-          } catch (err: any) {
-            controller.enqueue(
-              enc.encode(JSON.stringify({ error: err?.message || 'Upstream fetch failed' })),
-            );
-          } finally {
-            upstreamDone = true;
-            try { controller.close(); } catch {}
-          }
-        })();
-
-        // Keep the Worker alive for the duration of both tasks.
-        waitUntil(Promise.all([heartbeat, upstream]));
-      },
-    });
-
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
-        'Access-Control-Allow-Origin': '*',
-        'X-Accel-Buffering': 'no',
-      },
+    const response = await fetch(url, init);
+    const headers = new Headers();
+    const ct = response.headers.get('content-type');
+    if (ct) headers.set('Content-Type', ct);
+    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set('Cache-Control', 'no-store');
+    return new Response(response.body, {
+      status: response.status,
+      headers,
     });
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message || 'Internal Server Error' }), {
