@@ -38,22 +38,18 @@ export const onRequest: PagesFunction<Env> = async ({ request, params, env }) =>
     }
 
     const response = await fetch(url, init);
-    const contentType = response.headers.get('content-type') || '';
-    const resText = await response.text();
-    let payload: string;
-    if (contentType.includes('application/json') && resText) {
-      try {
-        JSON.parse(resText);
-        payload = resText;
-      } catch {
-        payload = JSON.stringify({ raw: resText });
-      }
-    } else {
-      payload = JSON.stringify({ raw: resText });
-    }
-    return new Response(payload, {
+    // Stream the upstream body straight through. This is critical for
+    // long-running endpoints like image generation: returning the Response
+    // object immediately lets Cloudflare's edge start forwarding bytes,
+    // avoiding the 100s edge HTTP timeout (524).
+    const headers = new Headers();
+    const upstreamCT = response.headers.get('content-type');
+    if (upstreamCT) headers.set('Content-Type', upstreamCT);
+    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set('Cache-Control', 'no-store');
+    return new Response(response.body, {
       status: response.status,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
     });
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message || 'Internal Server Error' }), {
