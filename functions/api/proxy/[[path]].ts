@@ -4,7 +4,7 @@ interface Env {
 
 const BASE_URL = 'https://chatgpt.alanbulan.space/v1';
 
-export const onRequest: PagesFunction<Env> = async ({ request, params, env }) => {
+export const onRequest: PagesFunction<Env> = async ({ request, params, env, waitUntil }) => {
   const method = request.method.toUpperCase();
   if (method !== 'GET' && method !== 'POST' && method !== 'OPTIONS') {
     return new Response('Method Not Allowed', { status: 405 });
@@ -44,29 +44,43 @@ export const onRequest: PagesFunction<Env> = async ({ request, params, env }) =>
     // whitespace until the upstream resolves; JSON tolerates leading whitespace,
     // so the client's res.json()/res.text()+parse path keeps working unchanged.
     const stream = new ReadableStream({
-      async start(controller) {
+      start(controller) {
         const enc = new TextEncoder();
+        // Emit a byte synchronously so the CF edge sees us "responding"
+        // immediately — this resets the edge HTTP timer before fetch().
+        controller.enqueue(enc.encode(' '));
         let upstreamDone = false;
 
-        (async () => {
+        // Heartbeat: keep dribbling whitespace every 5s so the edge keeps
+        // the client connection open while upstream is still working.
+        const heartbeat = (async () => {
           while (!upstreamDone) {
-            try { controller.enqueue(enc.encode(' ')); } catch { return; }
             await new Promise((r) => setTimeout(r, 5000));
+            if (upstreamDone) break;
+            try { controller.enqueue(enc.encode(' ')); } catch { return; }
           }
         })();
 
-        try {
-          const response = await fetch(url, init);
-          const text = await response.text();
-          controller.enqueue(enc.encode(text));
-        } catch (err: any) {
-          controller.enqueue(
-            enc.encode(JSON.stringify({ error: err?.message || 'Upstream fetch failed' })),
-          );
-        } finally {
-          upstreamDone = true;
-          try { controller.close(); } catch {}
-        }
+        // Upstream fetch runs in the background; only its real body bytes
+        // (which JSON.parse on the client sees after stripping whitespace)
+        // are meaningful.
+        const upstream = (async () => {
+          try {
+            const response = await fetch(url, init);
+            const text = await response.text();
+            controller.enqueue(enc.encode(text));
+          } catch (err: any) {
+            controller.enqueue(
+              enc.encode(JSON.stringify({ error: err?.message || 'Upstream fetch failed' })),
+            );
+          } finally {
+            upstreamDone = true;
+            try { controller.close(); } catch {}
+          }
+        })();
+
+        // Keep the Worker alive for the duration of both tasks.
+        waitUntil(Promise.all([heartbeat, upstream]));
       },
     });
 
