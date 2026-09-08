@@ -22,7 +22,17 @@ export const onRequest: PagesFunction<Env> = async ({ request, params, env }) =>
 
   const raw = params.path;
   const apiPath = Array.isArray(raw) ? raw.join('/') : (raw ?? '');
-  const API_KEY = env.CUSTOM_API_KEY || 'wrl1314520';
+  const API_KEY = env.CUSTOM_API_KEY?.trim();
+  if (!API_KEY) {
+    return new Response(JSON.stringify({ error: 'CUSTOM_API_KEY is not configured' }), {
+      status: 503,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
   const url = `${BASE_URL}/${apiPath}`;
 
   try {
